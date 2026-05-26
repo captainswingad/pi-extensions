@@ -61,7 +61,7 @@ async function mirrorGlobalExtensionIfNeeded(path: string) {
 }
 
 async function commitAndPush(reason: string) {
-  await runGit(["add", "extensions", "README.md", "package.json"]);
+  await runGit(["add", "extensions", "docs", "README.md", "package.json"]);
 
   const status = await runGit(["status", "--porcelain"]);
   if (!status) return "No extension changes to push.";
@@ -82,6 +82,8 @@ async function commitAndPush(reason: string) {
  * `extensions/` directory, the extension commits and pushes the change. If a
  * global extension under `~/.pi/agent/extensions/` is modified, it is mirrored
  * into this package first so GitHub remains the source of versioned history.
+ * Documentation changes under `docs/` are included in the same commit; each
+ * extension should document itself in `docs/<extension_name>.md`.
  */
 export default function (pi: ExtensionAPI) {
   let running = false;
