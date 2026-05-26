@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -41,9 +41,9 @@ function latestSessionName(jsonl: string) {
   return name || undefined;
 }
 
-async function sessionNameExists(name: string, currentSessionFile?: string) {
+async function findSessionByName(name: string, currentSessionFile?: string) {
   const normalizedName = name.trim();
-  if (!normalizedName) return false;
+  if (!normalizedName) return undefined;
 
   const current = currentSessionFile ? resolve(currentSessionFile) : undefined;
   const files = await findSessionFiles(sessionsDir);
@@ -53,13 +53,17 @@ async function sessionNameExists(name: string, currentSessionFile?: string) {
 
     try {
       const existingName = latestSessionName(await readFile(file, "utf8"));
-      if (existingName === normalizedName) return true;
+      if (existingName === normalizedName) return file;
     } catch {
       // Ignore sessions that cannot be read.
     }
   }
 
-  return false;
+  return undefined;
+}
+
+async function sessionNameExists(name: string, currentSessionFile?: string) {
+  return (await findSessionByName(name, currentSessionFile)) !== undefined;
 }
 
 function errorMessage(error: unknown) {
@@ -85,24 +89,23 @@ function trySetSessionName(pi: ExtensionAPI, name: string) {
 }
 
 function randomSessionName() {
-  return `session-${randomBytes(4).toString("hex")}`;
+  return randomUUID();
 }
 
-async function uniqueRandomSessionName(currentSessionFile?: string) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const name = randomSessionName();
-    if (!(await sessionNameExists(name, currentSessionFile))) return name;
-  }
+async function resumeSession(ctx: unknown, sessionFile: string) {
+  const switchSession = (ctx as { switchSession?: (path: string) => Promise<{ cancelled: boolean }> }).switchSession;
+  if (!switchSession) return false;
 
-  return `session-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`;
+  const result = await switchSession(sessionFile);
+  return !result.cancelled;
 }
 
 /**
- * Require every new Pi session to have a unique display name.
+ * Require every new Pi session to have a display name.
  *
- * The extension prompts interactively until the user provides a non-empty name
- * that is not already used by another session. When a conflict happens, the user
- * can choose a generated random name instead of inventing another one.
+ * The extension prompts interactively until the user provides a non-empty name.
+ * When a conflict happens, the user can choose a generated UUID name instead of
+ * inventing another one.
  */
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (event, ctx) => {
@@ -117,41 +120,48 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (!ctx.hasUI) {
-      ctx.ui.notify("Session needs a unique name, but no UI is available to prompt for one.", "warning");
       return;
     }
 
     let message = existingCurrentName
       ? `Session name "${existingCurrentName}" already exists. Choose a different name.`
-      : "Enter a unique session name.";
+      : "Enter a session name.";
     let conflictingName = existingCurrentName;
+    let conflictingSessionFile = existingCurrentName
+      ? await findSessionByName(existingCurrentName, currentSessionFile)
+      : undefined;
 
     for (;;) {
       let name: string;
 
       if (conflictingName) {
-        const choice = await ctx.ui.select(`Session name "${conflictingName}" already exists.`, [
-          "Use a random name",
-          "Enter another name",
-        ]);
+        const choices = ["Use a random UUID", "Enter another name", "Continue with existing session"];
+        const choice = await ctx.ui.select(`Session name "${conflictingName}" already exists.`, choices);
 
         if (choice === undefined) {
           ctx.shutdown();
           return;
         }
 
-        if (choice === "Use a random name") {
+        if (choice === "Use a random UUID") {
           conflictingName = undefined;
-          name = await uniqueRandomSessionName(currentSessionFile);
+          conflictingSessionFile = undefined;
+          name = randomSessionName();
+        } else if (choice === "Continue with existing session") {
+          if (conflictingSessionFile && (await resumeSession(ctx, conflictingSessionFile))) return;
+          ctx.ui.notify("This Pi context cannot switch sessions from session_start.", "warning");
+          ctx.shutdown();
+          return;
         } else {
           conflictingName = undefined;
+          conflictingSessionFile = undefined;
           continue;
         }
       } else {
         let input: string | undefined;
 
         try {
-          input = await ctx.ui.input(`Name this session\n${message}`);
+          input = await ctx.ui.input("Name this session", message);
         } catch {
           input = undefined;
         }
@@ -165,15 +175,16 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (!name) {
-        message = "A session name is required. Enter a unique session name.";
-        ctx.ui.notify(message, "warning");
+        message = "A session name is required.";
         continue;
       }
 
-      if (await sessionNameExists(name, currentSessionFile)) {
+      const existingSessionFile = await findSessionByName(name, currentSessionFile);
+      if (existingSessionFile) {
         const choice = await ctx.ui.select(`Session name "${name}" already exists.`, [
-          "Use a random name",
+          "Use a random UUID",
           "Enter another name",
+          "Continue with existing session",
         ]);
 
         if (choice === undefined) {
@@ -181,8 +192,13 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
-        if (choice === "Use a random name") {
-          name = await uniqueRandomSessionName(currentSessionFile);
+        if (choice === "Use a random UUID") {
+          name = randomSessionName();
+        } else if (choice === "Continue with existing session") {
+          if (await resumeSession(ctx, existingSessionFile)) return;
+          ctx.ui.notify("This Pi context cannot switch sessions from session_start.", "warning");
+          ctx.shutdown();
+          return;
         } else {
           message = `Session name "${name}" already exists. Choose a different name.`;
           continue;
