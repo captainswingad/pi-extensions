@@ -1,19 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const sessionsDir = join(homedir(), ".pi", "agent", "sessions");
-
-/**
- * Build a collision-resistant default name for sessions that the user does not
- * name explicitly. The prefix keeps these sessions easy to find in Pi's session
- * picker while the UUID avoids accidental duplicates.
- */
-function fallbackName() {
-  return `scratch-${randomUUID()}`;
-}
 
 async function findSessionFiles(dir: string): Promise<string[]> {
   try {
@@ -71,20 +61,13 @@ async function sessionNameExists(name: string, currentSessionFile?: string) {
   return false;
 }
 
-async function uniqueFallbackName(currentSessionFile?: string) {
-  for (;;) {
-    const candidate = fallbackName();
-    if (!(await sessionNameExists(candidate, currentSessionFile))) return candidate;
-  }
-}
-
 /**
  * Require every new Pi session to have a unique display name.
  *
- * The extension prompts interactively when Pi has a UI, but remains safe for
- * non-interactive contexts by falling back to an automatically generated name.
- * If a requested name already belongs to another session, the user is asked to
- * choose a different name.
+ * The extension prompts interactively until the user provides a non-empty name
+ * that is not already used by another session. It intentionally does not assign
+ * automatic fallback names; conflicts and blank names must be resolved by the
+ * user when a UI is available.
  */
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (event, ctx) => {
@@ -98,32 +81,39 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    let name = existingCurrentName;
-    let conflict = Boolean(existingCurrentName);
-
-    while (ctx.hasUI) {
-      try {
-        const prompt = conflict
-          ? `Session name "${name}" already exists. Choose a different name.`
-          : "Leave blank or press Esc for scratch-<uuid>";
-
-        const input = await ctx.ui.input("Name this session", prompt);
-        name = input?.trim() || undefined;
-      } catch {
-        name = undefined;
-      }
-
-      if (!name) break;
-
-      conflict = await sessionNameExists(name, currentSessionFile);
-      if (!conflict) break;
+    if (!ctx.hasUI) {
+      ctx.ui.notify("Session needs a unique name, but no UI is available to prompt for one.", "warn");
+      return;
     }
 
-    const finalName = name && !(await sessionNameExists(name, currentSessionFile))
-      ? name
-      : await uniqueFallbackName(currentSessionFile);
+    let message = existingCurrentName
+      ? `Session name "${existingCurrentName}" already exists. Choose a different name.`
+      : "Enter a unique session name.";
 
-    pi.setSessionName(finalName);
-    ctx.ui.notify(`Session named: ${finalName}`, "info");
+    for (;;) {
+      let input: string | undefined;
+
+      try {
+        input = await ctx.ui.input("Name this session", message);
+      } catch {
+        input = undefined;
+      }
+
+      const name = input?.trim();
+
+      if (!name) {
+        message = "A session name is required. Enter a unique session name.";
+        continue;
+      }
+
+      if (await sessionNameExists(name, currentSessionFile)) {
+        message = `Session name "${name}" already exists. Choose a different name.`;
+        continue;
+      }
+
+      pi.setSessionName(name);
+      ctx.ui.notify(`Session named: ${name}`, "info");
+      return;
+    }
   });
 }
