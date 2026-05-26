@@ -1,4 +1,4 @@
-# `require-session-name`
+# `name-session`
 
 Prompts for a unique, human-readable session name whenever a Pi session starts without one or has a name that conflicts with another session.
 

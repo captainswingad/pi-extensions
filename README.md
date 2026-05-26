@@ -6,7 +6,7 @@ Personal extensions for the [Pi coding agent](https://github.com/earendil-works/
 
 This package currently includes:
 
-- [`require-session-name`](docs/require-session-name.md)
+- [`name-session`](docs/name-session.md)
 
 Each extension has its own documentation file under `docs/<extension-name>.md`.
 
@@ -31,9 +31,9 @@ After installing, restart Pi or run `/reload` in an existing Pi session.
 ```text
 .
 ├── docs/
-│   └── require-session-name.md
+│   └── name-session.md
 ├── extensions/
-│   └── require-session-name.ts
+│   └── name-session.ts
 ├── package.json
 └── README.md
 ```
@@ -46,7 +46,7 @@ The `package.json` file declares this repository as a Pi package via the `pi.ext
 2. Test locally with:
 
    ```bash
-   pi -e ./extensions/require-session-name.ts
+   pi -e ./extensions/name-session.ts
    ```
 
 3. Commit changes with a descriptive message.
