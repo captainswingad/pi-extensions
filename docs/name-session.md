@@ -8,8 +8,8 @@ Prompts for a unique, human-readable session name whenever a Pi session starts w
 - Leaves already named sessions unchanged when the name is unique.
 - Checks existing Pi session files for name conflicts.
 - Requires a non-empty session name; blank or cancelled prompts reopen the prompt.
-- Does not assign automatic fallback names like `scratch-<uuid>`.
 - When a typed name already exists, offers two choices:
+  - name randomly
   - enter another name
-  - resume the existing session with that name
-- The resume choice switches directly to the existing session; it does not create or queue a helper slash command.
+- Random names are UUIDs and are applied without an additional uniqueness check.
+- The extension no longer resumes or switches to existing sessions.

@@ -1,21 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const sessionsDir = join(homedir(), ".pi", "agent", "sessions");
+const randomNameChoice = "Name randomly";
 const enterNameChoice = "Enter another name";
-const resumeSessionChoice = "Resume existing session";
 
-type ConflictChoice = typeof enterNameChoice | typeof resumeSessionChoice;
-type SwitchableContext = ExtensionContext & {
-  switchSession?: (sessionPath: string) => Promise<{ cancelled: boolean }>;
-};
+type ConflictChoice = typeof randomNameChoice | typeof enterNameChoice;
 
 type NamePromptResult =
   | { action: "set"; name: string }
   | { action: "retry"; message?: string }
-  | { action: "done" }
   | { action: "cancel" };
 
 async function findSessionFiles(dir: string): Promise<string[]> {
@@ -105,7 +102,11 @@ function trySetSessionName(pi: ExtensionAPI, name: string) {
 }
 
 function conflictChoices() {
-  return [enterNameChoice, resumeSessionChoice] satisfies ConflictChoice[];
+  return [randomNameChoice, enterNameChoice] satisfies ConflictChoice[];
+}
+
+function chooseRandomName(): NamePromptResult {
+  return { action: "set", name: randomUUID() };
 }
 
 async function promptForName(ctx: ExtensionContext, message: string) {
@@ -122,29 +123,15 @@ async function promptForConflictChoice(ctx: ExtensionContext, name: string) {
     | undefined;
 }
 
-async function resumeExistingSession(ctx: ExtensionContext, sessionFile: string) {
-  const switchSession = (ctx as SwitchableContext).switchSession;
-  if (!switchSession) {
-    ctx.ui.notify("Pi cannot resume a session from this extension event.", "warning");
-    return false;
-  }
-
-  const result = await switchSession.call(ctx, sessionFile);
-  if (result.cancelled) {
-    ctx.ui.notify("Session switch was cancelled.", "warning");
-    return false;
-  }
-
-  return true;
-}
-
-async function handleConflict(ctx: ExtensionContext, name: string, sessionFile: string): Promise<NamePromptResult> {
+async function handleConflict(
+  ctx: ExtensionContext,
+  name: string,
+  currentSessionFile?: string,
+): Promise<NamePromptResult> {
   const choice = await promptForConflictChoice(ctx, name);
 
   if (choice === undefined) return { action: "cancel" };
-  if (choice === resumeSessionChoice) {
-    return (await resumeExistingSession(ctx, sessionFile)) ? { action: "done" } : { action: "cancel" };
-  }
+  if (choice === randomNameChoice) return chooseRandomName();
 
   return {
     action: "retry",
@@ -162,7 +149,7 @@ async function chooseTypedName(
   if (!name) return { action: "retry", message: "A session name is required." };
 
   const existingSessionFile = await findSessionByName(name, currentSessionFile);
-  if (existingSessionFile) return handleConflict(ctx, name, existingSessionFile);
+  if (existingSessionFile) return handleConflict(ctx, name, currentSessionFile);
 
   return { action: "set", name };
 }
@@ -171,19 +158,19 @@ async function chooseSessionName(
   ctx: ExtensionContext,
   initialMessage: string,
   currentSessionFile?: string,
-  initialConflict?: { name: string; sessionFile: string },
+  initialConflictName?: string,
 ) {
   let message = initialMessage;
-  let conflict = initialConflict;
+  let conflictName = initialConflictName;
 
   for (;;) {
-    const result = conflict
-      ? await handleConflict(ctx, conflict.name, conflict.sessionFile)
+    const result = conflictName
+      ? await handleConflict(ctx, conflictName, currentSessionFile)
       : await chooseTypedName(ctx, message, currentSessionFile);
 
-    conflict = undefined;
+    conflictName = undefined;
 
-    if (result.action === "set" || result.action === "done" || result.action === "cancel") return result;
+    if (result.action === "set" || result.action === "cancel") return result;
     message = result.message ?? message;
   }
 }
@@ -206,12 +193,9 @@ async function nameSession(pi: ExtensionAPI, ctx: ExtensionContext) {
     ctx,
     initialMessage,
     currentSessionFile,
-    existingCurrentName && initialConflictFile
-      ? { name: existingCurrentName, sessionFile: initialConflictFile }
-      : undefined,
+    existingCurrentName && initialConflictFile ? existingCurrentName : undefined,
   );
 
-  if (result.action === "done") return;
   if (result.action === "cancel") {
     ctx.shutdown();
     return;
@@ -232,7 +216,7 @@ async function nameSession(pi: ExtensionAPI, ctx: ExtensionContext) {
  *
  * The extension prompts interactively until the user provides a non-empty name
  * that is not already used by another session. When a conflict happens, the user
- * can either enter another name or resume the existing session with that name.
+ * can either name the session randomly or enter another name.
  */
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (event, ctx) => {
