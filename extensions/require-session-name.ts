@@ -124,22 +124,44 @@ export default function (pi: ExtensionAPI) {
     let message = existingCurrentName
       ? `Session name "${existingCurrentName}" already exists. Choose a different name.`
       : "Enter a unique session name.";
+    let conflictingName = existingCurrentName;
 
     for (;;) {
-      let input: string | undefined;
+      let name: string;
 
-      try {
-        input = await ctx.ui.input(`Name this session\n${message}`);
-      } catch {
-        input = undefined;
+      if (conflictingName) {
+        const choice = await ctx.ui.select(`Session name "${conflictingName}" already exists.`, [
+          "Use a random name",
+          "Enter another name",
+        ]);
+
+        if (choice === undefined) {
+          ctx.shutdown();
+          return;
+        }
+
+        if (choice === "Use a random name") {
+          name = await uniqueRandomSessionName(currentSessionFile);
+        } else {
+          conflictingName = undefined;
+          continue;
+        }
+      } else {
+        let input: string | undefined;
+
+        try {
+          input = await ctx.ui.input(`Name this session\n${message}`);
+        } catch {
+          input = undefined;
+        }
+
+        if (input === undefined) {
+          ctx.shutdown();
+          return;
+        }
+
+        name = input.trim();
       }
-
-      if (input === undefined) {
-        ctx.shutdown();
-        return;
-      }
-
-      let name = input.trim();
 
       if (!name) {
         message = "A session name is required. Enter a unique session name.";
