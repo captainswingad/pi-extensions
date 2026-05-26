@@ -35,7 +35,7 @@ Limitations:
 Install the latest version from GitHub:
 
 ```bash
-pi install git:github.com/captainswingad/pi-extensions@v0.2.0
+pi install git:github.com/captainswingad/pi-extensions@v0.2.1
 ```
 
 For active development, install from `main`:

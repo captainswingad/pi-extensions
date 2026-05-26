@@ -44,7 +44,8 @@ async function runGit(args: string[]) {
 }
 
 async function currentBranch() {
-  return (await runGit(["branch", "--show-current"])).trim() || "main";
+  const branch = (await runGit(["branch", "--show-current"])).trim();
+  return branch || undefined;
 }
 
 async function mirrorGlobalExtensionIfNeeded(path: string) {
@@ -66,7 +67,11 @@ async function commitAndPush(reason: string) {
   if (!status) return "No extension changes to push.";
 
   await runGit(["commit", "-m", `chore: auto-version pi extension changes (${reason})`]);
-  await runGit(["push", "origin", await currentBranch()]);
+
+  // Pi can install git packages at an immutable tag, which leaves the package
+  // checkout detached. In that case, push the new commit explicitly to main.
+  const branch = await currentBranch();
+  await runGit(["push", "origin", branch ?? "HEAD:main"]);
   return "Committed and pushed Pi extension changes.";
 }
 
