@@ -1,6 +1,6 @@
 {
   "name": "pi-extensions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Personal Pi coding agent extensions packaged for installation from GitHub.",
   "type": "module",
   "keywords": [
