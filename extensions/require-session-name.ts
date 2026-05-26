@@ -2,15 +2,14 @@ import { randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const sessionsDir = join(homedir(), ".pi", "agent", "sessions");
 const randomNameChoice = "Use a random UUID";
 const enterNameChoice = "Enter another name";
 const resumeSessionChoice = "Continue with existing session";
+const resumeExistingSessionCommand = "require-session-name-resume-existing";
 
-type SwitchSession = (path: string) => Promise<{ cancelled: boolean }>;
-type MaybeSwitchContext = ExtensionContext & { switchSession?: SwitchSession };
 type ConflictChoice = typeof randomNameChoice | typeof enterNameChoice | typeof resumeSessionChoice;
 type NamePromptResult =
   | { action: "set"; name: string }
@@ -108,22 +107,21 @@ function randomSessionName() {
   return randomUUID();
 }
 
-function getSwitchSession(ctx: ExtensionContext): SwitchSession | undefined {
-  return (ctx as MaybeSwitchContext).switchSession;
+function conflictChoices() {
+  return [randomNameChoice, enterNameChoice, resumeSessionChoice] satisfies ConflictChoice[];
 }
 
-function conflictChoices(ctx: ExtensionContext) {
-  const choices: ConflictChoice[] = [randomNameChoice, enterNameChoice];
-  if (getSwitchSession(ctx)) choices.push(resumeSessionChoice);
-  return choices;
-}
+function queueResumeSession(pi: ExtensionAPI, ctx: ExtensionContext, sessionFile: string) {
+  pendingResumeSessionFile = sessionFile;
 
-async function resumeSession(ctx: ExtensionContext, sessionFile: string) {
-  const switchSession = getSwitchSession(ctx);
-  if (!switchSession) return false;
-
-  const result = await switchSession(sessionFile);
-  return !result.cancelled;
+  try {
+    pi.sendUserMessage(`/${resumeExistingSessionCommand}`);
+    return true;
+  } catch (error) {
+    pendingResumeSessionFile = undefined;
+    ctx.ui.notify(`Could not queue session switch: ${errorMessage(error)}`, "warning");
+    return false;
+  }
 }
 
 async function promptForName(ctx: ExtensionContext, message: string) {
@@ -135,19 +133,23 @@ async function promptForName(ctx: ExtensionContext, message: string) {
 }
 
 async function promptForConflictChoice(ctx: ExtensionContext, name: string) {
-  return (await ctx.ui.select(`Session name "${name}" already exists.`, conflictChoices(ctx))) as
+  return (await ctx.ui.select(`Session name "${name}" already exists.`, conflictChoices())) as
     | ConflictChoice
     | undefined;
 }
 
-async function handleConflict(ctx: ExtensionContext, name: string, sessionFile: string): Promise<NamePromptResult> {
+async function handleConflict(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  name: string,
+  sessionFile: string,
+): Promise<NamePromptResult> {
   const choice = await promptForConflictChoice(ctx, name);
 
   if (choice === undefined) return { action: "cancel" };
   if (choice === randomNameChoice) return { action: "set", name: randomSessionName() };
   if (choice === resumeSessionChoice) {
-    if (await resumeSession(ctx, sessionFile)) return { action: "done" };
-    ctx.ui.notify("This Pi context cannot switch sessions from session_start.", "warning");
+    if (queueResumeSession(pi, ctx, sessionFile)) return { action: "done" };
     return { action: "cancel" };
   }
 
@@ -158,14 +160,16 @@ async function handleConflict(ctx: ExtensionContext, name: string, sessionFile: 
 }
 
 async function chooseInitialConflictName(
+  pi: ExtensionAPI,
   ctx: ExtensionContext,
   name: string,
   sessionFile: string,
 ): Promise<NamePromptResult> {
-  return handleConflict(ctx, name, sessionFile);
+  return handleConflict(pi, ctx, name, sessionFile);
 }
 
 async function chooseTypedName(
+  pi: ExtensionAPI,
   ctx: ExtensionContext,
   message: string,
   currentSessionFile?: string,
@@ -175,12 +179,13 @@ async function chooseTypedName(
   if (!name) return { action: "retry", message: "A session name is required." };
 
   const existingSessionFile = await findSessionByName(name, currentSessionFile);
-  if (existingSessionFile) return handleConflict(ctx, name, existingSessionFile);
+  if (existingSessionFile) return handleConflict(pi, ctx, name, existingSessionFile);
 
   return { action: "set", name };
 }
 
 async function chooseSessionName(
+  pi: ExtensionAPI,
   ctx: ExtensionContext,
   initialMessage: string,
   currentSessionFile?: string,
@@ -191,8 +196,8 @@ async function chooseSessionName(
 
   for (;;) {
     const result = conflict
-      ? await chooseInitialConflictName(ctx, conflict.name, conflict.sessionFile)
-      : await chooseTypedName(ctx, message, currentSessionFile);
+      ? await chooseInitialConflictName(pi, ctx, conflict.name, conflict.sessionFile)
+      : await chooseTypedName(pi, ctx, message, currentSessionFile);
 
     conflict = undefined;
 
@@ -216,6 +221,7 @@ async function nameSession(pi: ExtensionAPI, ctx: ExtensionContext) {
     : "Enter a session name.";
 
   const result = await chooseSessionName(
+    pi,
     ctx,
     initialMessage,
     currentSessionFile,
@@ -247,7 +253,26 @@ async function nameSession(pi: ExtensionAPI, ctx: ExtensionContext) {
  * When a conflict happens, the user can choose a generated UUID name instead of
  * inventing another one.
  */
+let pendingResumeSessionFile: string | undefined;
+
+async function resumeQueuedSession(ctx: ExtensionCommandContext) {
+  const sessionFile = pendingResumeSessionFile;
+  pendingResumeSessionFile = undefined;
+
+  if (!sessionFile) {
+    ctx.ui.notify("No existing session is queued to resume.", "warning");
+    return;
+  }
+
+  const result = await ctx.switchSession(sessionFile);
+  if (result.cancelled) ctx.ui.notify("Session switch was cancelled.", "warning");
+}
+
 export default function (pi: ExtensionAPI) {
+  pi.registerCommand(resumeExistingSessionCommand, {
+    description: "Resume the conflicting named session selected by require-session-name.",
+    handler: async (_args, ctx) => resumeQueuedSession(ctx),
+  });
   pi.on("session_start", async (event, ctx) => {
     // Reloading extensions should preserve the current session name.
     if (event.reason === "reload") return;
