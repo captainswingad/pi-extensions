@@ -141,6 +141,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (choice === "Use a random name") {
+          conflictingName = undefined;
           name = await uniqueRandomSessionName(currentSessionFile);
         } else {
           conflictingName = undefined;
