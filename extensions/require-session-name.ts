@@ -116,7 +116,7 @@ export default function (pi: ExtensionAPI) {
       let input: string | undefined;
 
       try {
-        input = await ctx.ui.input("Name this session", message);
+        input = await ctx.ui.input(`Name this session\n${message}`);
       } catch {
         input = undefined;
       }
@@ -125,11 +125,13 @@ export default function (pi: ExtensionAPI) {
 
       if (!name) {
         message = "A session name is required. Enter a unique session name.";
+        ctx.ui.notify(message, "warning");
         continue;
       }
 
       if (await sessionNameExists(name, currentSessionFile)) {
         message = `Session name "${name}" already exists. Choose a different name.`;
+        ctx.ui.notify(message, "warning");
         continue;
       }
 
