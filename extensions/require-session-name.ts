@@ -61,6 +61,28 @@ async function sessionNameExists(name: string, currentSessionFile?: string) {
   return false;
 }
 
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function trySetSessionName(pi: ExtensionAPI, name: string) {
+  try {
+    pi.setSessionName(name);
+  } catch (error) {
+    return { success: false as const, error: errorMessage(error) };
+  }
+
+  const appliedName = pi.getSessionName()?.trim();
+  if (appliedName !== name) {
+    return {
+      success: false as const,
+      error: appliedName ? `Pi applied "${appliedName}" instead.` : "Pi did not apply the session name.",
+    };
+  }
+
+  return { success: true as const };
+}
+
 /**
  * Require every new Pi session to have a unique display name.
  *
@@ -82,7 +104,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (!ctx.hasUI) {
-      ctx.ui.notify("Session needs a unique name, but no UI is available to prompt for one.", "warn");
+      ctx.ui.notify("Session needs a unique name, but no UI is available to prompt for one.", "warning");
       return;
     }
 
@@ -111,7 +133,12 @@ export default function (pi: ExtensionAPI) {
         continue;
       }
 
-      pi.setSessionName(name);
+      const result = trySetSessionName(pi, name);
+      if (!result.success) {
+        message = `Could not name this session "${name}": ${result.error}. Choose a different name.`;
+        continue;
+      }
+
       ctx.ui.notify(`Session named: ${name}`, "info");
       return;
     }
