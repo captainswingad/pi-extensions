@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -83,13 +84,25 @@ function trySetSessionName(pi: ExtensionAPI, name: string) {
   return { success: true as const };
 }
 
+function randomSessionName() {
+  return `session-${randomBytes(4).toString("hex")}`;
+}
+
+async function uniqueRandomSessionName(currentSessionFile?: string) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const name = randomSessionName();
+    if (!(await sessionNameExists(name, currentSessionFile))) return name;
+  }
+
+  return `session-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`;
+}
+
 /**
  * Require every new Pi session to have a unique display name.
  *
  * The extension prompts interactively until the user provides a non-empty name
- * that is not already used by another session. It intentionally does not assign
- * automatic fallback names; conflicts and blank names must be resolved by the
- * user when a UI is available.
+ * that is not already used by another session. When a conflict happens, the user
+ * can choose a generated random name instead of inventing another one.
  */
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (event, ctx) => {
@@ -121,7 +134,12 @@ export default function (pi: ExtensionAPI) {
         input = undefined;
       }
 
-      const name = input?.trim();
+      if (input === undefined) {
+        ctx.shutdown();
+        return;
+      }
+
+      let name = input.trim();
 
       if (!name) {
         message = "A session name is required. Enter a unique session name.";
@@ -130,9 +148,22 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (await sessionNameExists(name, currentSessionFile)) {
-        message = `Session name "${name}" already exists. Choose a different name.`;
-        ctx.ui.notify(message, "warning");
-        continue;
+        const choice = await ctx.ui.select(`Session name "${name}" already exists.`, [
+          "Use a random name",
+          "Enter another name",
+        ]);
+
+        if (choice === undefined) {
+          ctx.shutdown();
+          return;
+        }
+
+        if (choice === "Use a random name") {
+          name = await uniqueRandomSessionName(currentSessionFile);
+        } else {
+          message = `Session name "${name}" already exists. Choose a different name.`;
+          continue;
+        }
       }
 
       const result = trySetSessionName(pi, name);
