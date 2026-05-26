@@ -7,7 +7,6 @@ Personal extensions for the [Pi coding agent](https://github.com/earendil-works/
 This package currently includes:
 
 - [`require-session-name`](docs/require-session-name.md)
-- [`auto-push-extensions`](docs/auto-push-extensions.md)
 
 Each extension has its own documentation file under `docs/<extension-name>.md`.
 
@@ -32,10 +31,8 @@ After installing, restart Pi or run `/reload` in an existing Pi session.
 ```text
 .
 ├── docs/
-│   ├── auto-push-extensions.md
 │   └── require-session-name.md
 ├── extensions/
-│   ├── auto-push-extensions.ts
 │   └── require-session-name.ts
 ├── package.json
 └── README.md
