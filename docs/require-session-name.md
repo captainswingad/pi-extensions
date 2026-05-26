@@ -1,6 +1,6 @@
 # `require-session-name`
 
-Prompts for a unique, human-readable session name whenever a new Pi session starts without one. If the prompt is unavailable, cancelled, left blank, or the requested name conflicts with another session, the extension assigns a safe fallback name in the form `scratch-<uuid>`.
+Prompts for a unique, human-readable session name whenever a Pi session starts without one or has a name that conflicts with another session.
 
 ## Behavior
 
@@ -8,5 +8,6 @@ Prompts for a unique, human-readable session name whenever a new Pi session star
 - Leaves already named sessions unchanged when the name is unique.
 - Checks existing Pi session files for name conflicts.
 - Asks for a different name if the chosen name already belongs to another session.
-- Uses Pi's UI input when available.
-- Falls back automatically in non-interactive contexts.
+- Requires a non-empty session name; blank or cancelled prompts reopen the prompt.
+- Does not assign automatic fallback names like `scratch-<uuid>`.
+- Warns and leaves the session unnamed if no UI is available to prompt for a name.
